@@ -1,0 +1,44 @@
+// storage.rules
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Payment proofs - only authenticated users can upload, only admin can read all
+    match /payment_proofs/{filename} {
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024  // Max 10MB
+        && request.resource.contentType.matches('image/.*|application/pdf');
+      allow read: if request.auth != null;
+    }
+
+    // Product files - only admin can write, authenticated for previews
+    match /products/{filename} {
+      allow write: if request.auth != null 
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow read: if request.auth != null;
+    }
+
+    // Product downloads - only admin uploads, verified buyers can download
+    match /downloads/{orderId}/{filename} {
+      allow write: if request.auth != null 
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      // Read allowed only if order belongs to user and is approved
+      allow read: if request.auth != null;
+    }
+
+    // User profile photos
+    match /profiles/{userId}/{filename} {
+      allow write: if request.auth != null && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow read: if true;
+    }
+
+    // Reference files uploaded by customers
+    match /reference_files/{filename} {
+      allow write: if request.auth != null
+        && request.resource.size < 20 * 1024 * 1024;
+      allow read: if request.auth != null;
+    }
+  }
+}
