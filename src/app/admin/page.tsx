@@ -163,8 +163,8 @@ export default function AdminPage() {
       <aside style={{
         width: 200, background: '#111', borderRight: '1px solid rgba(255,255,255,0.06)',
         display: 'flex', flexDirection: 'column', flexShrink: 0,
-        position: window.innerWidth < 768 ? 'fixed' : 'relative',
-        left: window.innerWidth < 768 ? (sidebarOpen ? 0 : -200) : 0,
+        position: 'fixed',
+        left: sidebarOpen ? 0 : -200,
         top: 0, bottom: 0, zIndex: 999,
         transition: 'left 0.3s ease',
         overflowY: 'auto',
