@@ -1,523 +1,474 @@
 'use client'
-// src/app/admin/page.tsx
 import { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
-import { BarChart2, Package, CreditCard, Users, MessageCircle, Cpu, Settings, TrendingUp, AlertCircle, Crown, LogOut } from 'lucide-react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { logout } from '@/lib/auth'
-import { getAdminStats, getPendingPayments, getAllOrders, approvePayment, rejectPayment } from '@/lib/firestore'
-import useStore from '@/store/useStore'
+import Link from 'next/link'
+import { BarChart2, Package, CreditCard, Users, MessageCircle, Cpu, Settings, LogOut, Menu, X } from 'lucide-react'
+import { db, auth } from '@/lib/firebase'
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { signOut } from 'firebase/auth'
 import toast from 'react-hot-toast'
 
-const SIDEBAR_ITEMS = [
-  { key: 'dashboard', label: 'Dashboard',   icon: BarChart2   },
-  { key: 'orders',    label: 'Orders',      icon: Package     },
-  { key: 'payments',  label: 'Payments',    icon: CreditCard  },
-  { key: 'customers', label: 'Customers',   icon: Users       },
-  { key: 'messages',  label: 'Messages',    icon: MessageCircle },
-  { key: 'ai',        label: 'AI Tools',    icon: Cpu         },
-  { key: 'settings',  label: 'Settings',    icon: Settings    },
-]
-
-const REVENUE_DATA = [
-  { day: 'Mon', value: 1200 },
-  { day: 'Tue', value: 1850 },
-  { day: 'Wed', value: 980  },
-  { day: 'Thu', value: 2100 },
-  { day: 'Fri', value: 1650 },
-  { day: 'Sat', value: 2800 },
-  { day: 'Sun', value: 1400 },
-]
-
-const DEMO_ORDERS = [
-  { id: '#1042', client: 'Chanda M.',  service: 'Logo Design',   amount: 250,  status: 'approved'  },
-  { id: '#1041', client: 'Bupe K.',    service: 'Flyer Design',  amount: 120,  status: 'payment_reviewing' },
-  { id: '#1040', client: 'Mwamba J.', service: 'Full Branding', amount: 1800, status: 'pending'   },
-  { id: '#1039', client: 'Lombe T.',  service: 'Motion Poster', amount: 400,  status: 'delivered' },
-  { id: '#1038', client: 'Tembo A.',  service: 'Video Ad',      amount: 850,  status: 'in_progress' },
+const SIDEBAR = [
+  { key: 'dashboard', label: 'Dashboard',  icon: BarChart2   },
+  { key: 'orders',    label: 'Orders',     icon: Package     },
+  { key: 'payments',  label: 'Payments',   icon: CreditCard  },
+  { key: 'customers', label: 'Customers',  icon: Users       },
+  { key: 'messages',  label: 'Messages',   icon: MessageCircle},
+  { key: 'ai',        label: 'AI Tools',   icon: Cpu         },
+  { key: 'settings',  label: 'Settings',   icon: Settings    },
 ]
 
 const AI_TOOLS = [
-  { key: 'caption', icon: '✍️',  label: 'Caption Generator',  desc: 'Viral social media captions' },
-  { key: 'adcopy',  icon: '📢',  label: 'Ad Copy Writer',      desc: 'Compelling ad campaigns'    },
-  { key: 'slogan',  icon: '💡',  label: 'Slogan Creator',      desc: 'Memorable brand slogans'    },
-  { key: 'brand',   icon: '👑',  label: 'Branding Ideas',      desc: 'Creative brand concepts'    },
-  { key: 'desc',    icon: '📝',  label: 'Product Description', desc: 'Engaging product copy'      },
-  { key: 'script',  icon: '🎬',  label: 'Video Ad Script',     desc: 'Social media video scripts' },
+  { key: 'caption', icon: '✍️', label: 'Caption Generator',  prompt: 'Write a viral social media caption for Ken Media Creative Studio in Zambia. Make it engaging with emojis. Max 3 sentences with hashtags.' },
+  { key: 'adcopy',  icon: '📢', label: 'Ad Copy Writer',      prompt: 'Write a compelling Facebook ad for Ken Media Creative Studio. Include hook, value and CTA. Max 4 sentences.' },
+  { key: 'slogan',  icon: '💡', label: 'Slogan Creator',      prompt: 'Generate 5 short memorable slogans for Ken Media Creative Studio in Zambia. One per line.' },
+  { key: 'brand',   icon: '👑', label: 'Branding Ideas',      prompt: 'Give a brand identity concept for an African creative studio: colors, fonts, personality, tagline.' },
+  { key: 'desc',    icon: '📝', label: 'Product Description', prompt: 'Write an engaging product description for a premium design pack from Ken Media Creative Studio.' },
+  { key: 'script',  icon: '🎬', label: 'Video Ad Script',     prompt: 'Write a 15-second video ad script for Ken Media Creative Studio with HOOK, VALUE and CTA.' },
 ]
 
-const AI_MOCK: Record<string, string> = {
-  caption: "🔥 Your brand deserves to be seen. At Ken Media Creative Studio, we don't just design — we create experiences that stop the scroll and start conversations. Premium design, Zambian excellence. 🇿🇲✨ #KenMedia #ZambiaDesign",
-  adcopy: "Tired of blending in? Ken Media Creative Studio crafts premium logos, motion posters, and branding that makes YOUR business unforgettable. Starting at K150. Message us today!",
-  slogan: "\"Design That Moves, Brands That Speak.\" | \"Africa's Vision, Global Standard.\" | \"Where Zambian Creativity Meets World-Class Design.\"",
-  brand: "Brand Identity Concept:\n🎨 Colors: Royal Gold + Deep Black + Pure White\n✍️ Fonts: Geometric display + Modern sans-serif\n🏷 Personality: Innovative, trustworthy, forward-thinking\n💡 Tagline: 'Built for Africa, Designed for the World'",
-  desc: "Elevate your brand with our premium design pack — crafted with pixel-perfect precision for Zambian businesses ready to stand out. Includes 15 editable templates, style guide, and print-ready files.",
-  script: "HOOK (0-3s): [Flash of a bland logo → transforms into stunning Ken Media design]\nVOICE: 'Your brand is talking. Is it saying the right things?'\nVALUE (4-12s): Show 3 before/after brand transformations\nCTA (13-15s): 'Ken Media Creative Studio. DM us NOW.' [WhatsApp icon pulse]",
+const STATUS_COLORS: Record<string,string> = {
+  pending: '#F39C12', payment_reviewing: '#3498DB',
+  approved: '#27AE60', in_progress: '#9B59B6',
+  ready: '#D4A017', delivered: '#1ABC9C', rejected: '#E74C3C',
 }
 
 export default function AdminPage() {
-  const { user } = useStore()
   const router = useRouter()
-  const [active, setActive] = useState('dashboard')
-  const [stats, setStats] = useState({ totalOrders: 28, totalClients: 214, pendingPayments: 7, totalRevenue: 14820 })
-  const [aiTool, setAiTool] = useState('caption')
-  const [aiPrompt, setAiPrompt] = useState('')
-  const [aiResult, setAiResult] = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
-  const [pendingPayments, setPendingPayments] = useState([
-    { id: 'p1', userName: 'Bupe K.', serviceName: 'Flyer Design', amount: 120, method: 'MTN Money', proofUrl: '#', orderId: 'o1' },
-    { id: 'p2', userName: 'Tembo A.', serviceName: 'Video Ad Production', amount: 850, method: 'Airtel Money', proofUrl: '#', orderId: 'o2' },
-  ])
+  const [active, setActive]         = useState('dashboard')
+  const [sidebarOpen, setSidebar]   = useState(false)
+  const [orders, setOrders]         = useState<any[]>([])
+  const [payments, setPayments]     = useState<any[]>([])
+  const [customers, setCustomers]   = useState<any[]>([])
+  const [messages, setMessages]     = useState<any[]>([])
+  const [aiTool, setAiTool]         = useState(AI_TOOLS[0])
+  const [aiPrompt, setAiPrompt]     = useState('')
+  const [aiResult, setAiResult]     = useState('')
+  const [aiLoading, setAiLoading]   = useState(false)
+  const user = auth.currentUser
 
-  // Guard: only admin
+  // Real-time orders
   useEffect(() => {
-    if (user && user.role !== 'admin') {
-      toast.error('Admin access required')
-      router.push('/')
-    }
-  }, [user, router])
+    const unsub = onSnapshot(
+      query(collection(db, 'orders'), orderBy('createdAt', 'desc')),
+      snap => setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      () => {}
+    )
+    return () => unsub()
+  }, [])
 
-  const handleApprove = async (payment: typeof pendingPayments[0]) => {
-    try {
-      // await approvePayment(payment.id, payment.orderId) // Real call
-      setPendingPayments((prev) => prev.filter((p) => p.id !== payment.id))
-      toast.success(`✅ Payment approved for ${payment.userName}! Download unlocked.`)
-    } catch { toast.error('Failed to approve payment') }
+  // Real-time payments
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'payments'), orderBy('createdAt', 'desc')),
+      snap => setPayments(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      () => {}
+    )
+    return () => unsub()
+  }, [])
+
+  // Real-time customers
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, 'users'),
+      snap => setCustomers(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      () => {}
+    )
+    return () => unsub()
+  }, [])
+
+  // Real-time messages
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, 'conversations'),
+      snap => setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      () => {}
+    )
+    return () => unsub()
+  }, [])
+
+  const handleLogout = async () => {
+    await signOut(auth)
+    toast.success('Logged out successfully')
+    router.push('/')
   }
 
-  const handleReject = async (payment: typeof pendingPayments[0]) => {
-    setPendingPayments((prev) => prev.filter((p) => p.id !== payment.id))
-    toast.success(`Payment rejected for ${payment.userName}`)
+  const approvePayment = async (payment: any) => {
+    try {
+      await updateDoc(doc(db, 'payments', payment.id), { status: 'approved', approvedAt: serverTimestamp() })
+      await updateDoc(doc(db, 'orders', payment.orderId), { status: 'approved', isDownloadUnlocked: true })
+      toast.success(`✅ Payment approved for ${payment.userName}! Download unlocked.`)
+    } catch (e) { toast.error('Failed to approve') }
+  }
+
+  const rejectPayment = async (payment: any) => {
+    try {
+      await updateDoc(doc(db, 'payments', payment.id), { status: 'rejected' })
+      await updateDoc(doc(db, 'orders', payment.orderId), { status: 'rejected' })
+      toast.success('Payment rejected')
+    } catch { toast.error('Failed to reject') }
+  }
+
+  const updateOrderStatus = async (orderId: string, status: string) => {
+    try {
+      await updateDoc(doc(db, 'orders', orderId), { status, updatedAt: serverTimestamp() })
+      toast.success('Status updated to: ' + status.replace(/_/g,' '))
+    } catch { toast.error('Failed to update') }
   }
 
   const generateAI = async () => {
-    if (!aiPrompt.trim()) { toast.error('Enter a prompt first'); return }
+    if (!aiPrompt.trim() && !aiTool.prompt) { toast.error('Enter a prompt'); return }
     setAiLoading(true)
     setAiResult('')
-
-    // In production: call /api/ai with OpenAI
-    // For demo: use mock response with typewriter effect
-    const response = AI_MOCK[aiTool] || 'AI response would appear here based on your OpenAI API key configuration.'
-    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1000))
-
-    let i = 0
-    setAiLoading(false)
-    const interval = setInterval(() => {
-      if (i < response.length) { setAiResult(response.slice(0, i + 1)); i++ }
-      else clearInterval(interval)
-    }, 10)
-  }
-
-  const statusColor = (s: string) => {
-    const map: Record<string, string> = {
-      pending: 'status-pending',
-      payment_reviewing: 'status-reviewing',
-      approved: 'status-approved',
-      in_progress: 'status-progress',
-      delivered: 'status-delivered',
+    try {
+      const res = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: aiTool.key, prompt: aiPrompt || aiTool.prompt, adminId: user?.uid }),
+      })
+      const data = await res.json()
+      if (data.result) {
+        let i = 0
+        const text = data.result
+        setAiLoading(false)
+        const interval = setInterval(() => {
+          if (i < text.length) { setAiResult(text.slice(0, i + 1)); i++ }
+          else clearInterval(interval)
+        }, 8)
+      } else {
+        toast.error(data.error || 'AI failed')
+        setAiLoading(false)
+      }
+    } catch {
+      toast.error('AI request failed — check your OpenAI key in .env')
+      setAiLoading(false)
     }
-    return map[s] || 'status-pending'
   }
 
-  const maxBar = Math.max(...REVENUE_DATA.map((d) => d.value))
+  const pendingPayments = payments.filter(p => p.status === 'pending_review')
+  const totalRevenue = orders.filter(o => ['approved','delivered'].includes(o.status)).reduce((s:number, o:any) => s + (o.amount || 0), 0)
+
+  const s = (key: string, item: any) => {
+    setActive(key)
+    setSidebar(false)
+  }
 
   return (
-    <div className="flex h-screen bg-dark overflow-hidden">
+    <div style={{ display: 'flex', height: '100vh', background: '#080808', overflow: 'hidden' }}>
+
+      {/* Mobile overlay */}
+      {sidebarOpen && <div onClick={() => setSidebar(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 998 }} />}
+
       {/* SIDEBAR */}
-      <aside className="w-52 bg-[#111] border-r border-white/[0.06] flex flex-col flex-shrink-0">
-        <div className="px-4 pt-5 pb-4 border-b border-white/[0.06]">
-          <div className="font-bebas text-base tracking-[2px] text-gold-gradient">KEN MEDIA</div>
-          <div className="text-[9px] tracking-[2px] text-[#88887f] uppercase mt-0.5">Admin Panel</div>
-          <div className="mt-2 flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full bg-gold-gradient flex items-center justify-center text-black text-[10px] font-bold">K</div>
+      <aside style={{
+        width: 200, background: '#111', borderRight: '1px solid rgba(255,255,255,0.06)',
+        display: 'flex', flexDirection: 'column', flexShrink: 0,
+        position: window.innerWidth < 768 ? 'fixed' : 'relative',
+        left: window.innerWidth < 768 ? (sidebarOpen ? 0 : -200) : 0,
+        top: 0, bottom: 0, zIndex: 999,
+        transition: 'left 0.3s ease',
+        overflowY: 'auto',
+      }}>
+        <div style={{ padding: '16px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: 2, color: '#D4A017', fontFamily: 'serif' }}>KEN MEDIA</div>
+          <div style={{ fontSize: 9, color: '#888', letterSpacing: 2, textTransform: 'uppercase', marginTop: 2 }}>Admin Panel</div>
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg,#D4A017,#F5C842)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#000', fontSize: 12 }}>
+              {user?.displayName?.[0] || 'K'}
+            </div>
             <div>
-              <div className="text-[11px] font-semibold truncate">{user?.displayName || 'Ken West'}</div>
-              <div className="text-[9px] text-[#D4A017]">Admin</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#F0EDE6', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.displayName || 'Admin'}</div>
+              <div style={{ fontSize: 9, color: '#D4A017' }}>Admin</div>
             </div>
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-2 py-3">
-          <p className="text-[8px] text-[#88887f] uppercase tracking-[2px] px-2 mb-1.5">Overview</p>
-          {SIDEBAR_ITEMS.slice(0, 5).map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setActive(key)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[12px] transition-all mb-1 ${
-                active === key
-                  ? 'bg-[rgba(212,160,23,0.1)] text-[#D4A017] font-semibold'
-                  : 'text-[#88887f] hover:bg-white/[0.04] hover:text-white'
-              }`}
-            >
-              <Icon size={15} /> {label}
+        <nav style={{ flex: 1, padding: '8px' }}>
+          {SIDEBAR.map(({ key, label, icon: Icon }) => (
+            <button key={key} onClick={() => s(key, null)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer', fontSize: 12, marginBottom: 2, border: 'none', background: active === key ? 'rgba(212,160,23,0.12)' : 'transparent', color: active === key ? '#D4A017' : '#888', fontWeight: active === key ? 600 : 400, transition: 'all 0.2s', position: 'relative' }}>
+              <Icon size={15} />
+              {label}
               {key === 'payments' && pendingPayments.length > 0 && (
-                <span className="ml-auto bg-[#D4A017] text-black text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
-                  {pendingPayments.length}
-                </span>
+                <span style={{ marginLeft: 'auto', background: '#D4A017', color: '#000', fontSize: 9, fontWeight: 700, width: 16, height: 16, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{pendingPayments.length}</span>
               )}
-            </button>
-          ))}
-          <p className="text-[8px] text-[#88887f] uppercase tracking-[2px] px-2 mt-3 mb-1.5">Tools</p>
-          {SIDEBAR_ITEMS.slice(5).map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setActive(key)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[12px] transition-all mb-1 ${
-                active === key
-                  ? 'bg-[rgba(212,160,23,0.1)] text-[#D4A017] font-semibold'
-                  : 'text-[#88887f] hover:bg-white/[0.04] hover:text-white'
-              }`}
-            >
-              <Icon size={15} /> {label}
             </button>
           ))}
         </nav>
 
-        <div className="px-2 py-3 border-t border-white/[0.06]">
-          <Link href="/" className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[12px] text-[#88887f] hover:bg-white/[0.04] hover:text-white transition-all mb-1">
+        <div style={{ padding: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, fontSize: 12, color: '#888', textDecoration: 'none', marginBottom: 4 }}>
             🏠 View Site
           </Link>
-          <button onClick={() => { logout(); router.push('/') }} className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[12px] text-red-400/70 hover:text-red-400 hover:bg-red-400/5 transition-all">
+          <button onClick={handleLogout} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer', fontSize: 12, color: '#E74C3C', background: 'rgba(231,76,60,0.08)', border: 'none', fontWeight: 600 }}>
             <LogOut size={15} /> Sign Out
           </button>
         </div>
       </aside>
 
       {/* MAIN */}
-      <main className="flex-1 overflow-y-auto bg-dark">
-        <div className="p-5">
+      <main style={{ flex: 1, overflowY: 'auto', background: '#080808' }}>
+        {/* Mobile top bar */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', position: 'sticky', top: 0, background: '#080808', zIndex: 10 }}>
+          <button onClick={() => setSidebar(!sidebarOpen)} style={{ background: 'rgba(255,255,255,0.06)', border: 'none', borderRadius: 8, padding: 8, cursor: 'pointer', color: '#888' }}>
+            {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#F0EDE6', textTransform: 'capitalize' }}>{active}</div>
+          <div style={{ fontSize: 10, color: '#D4A017' }}>LIVE ●</div>
+        </div>
 
-          {/* ===== DASHBOARD ===== */}
+        <div style={{ padding: 16 }}>
+
+          {/* DASHBOARD */}
           {active === 'dashboard' && (
             <div>
-              <div className="flex items-center justify-between mb-5">
-                <div>
-                  <h1 className="font-syne text-xl font-extrabold">Dashboard <span className="text-[#D4A017]">Overview</span></h1>
-                  <p className="text-xs text-[#88887f] mt-0.5">Live · {new Date().toLocaleDateString('en-ZM', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-                </div>
-              </div>
-
-              {/* Metrics */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+              <h1 style={{ fontFamily: 'serif', fontSize: 22, fontWeight: 800, marginBottom: 16 }}>
+                Dashboard <span style={{ color: '#D4A017' }}>Overview</span>
+              </h1>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
                 {[
-                  { label: 'Total Revenue',     value: `K${stats.totalRevenue.toLocaleString()}`, change: '+23%', color: '#D4A017' },
-                  { label: 'Active Orders',      value: stats.totalOrders,                         change: '+5 today', color: '#9B59B6' },
-                  { label: 'Pending Payments',   value: stats.pendingPayments,                     change: 'Need review', color: '#F39C12' },
-                  { label: 'Total Clients',      value: stats.totalClients,                        change: '+12 this week', color: '#27AE60' },
-                ].map((m) => (
-                  <div key={m.label} className="relative bg-[#1a1a1a] border border-white/[0.08] rounded-2xl p-4 overflow-hidden card-accent">
-                    <p className="text-[10px] text-[#88887f] uppercase tracking-wider mb-2">{m.label}</p>
-                    <p className="font-bebas text-3xl leading-none mb-1" style={{ color: m.color }}>{m.value}</p>
-                    <p className="text-[10px] text-green-400">↑ {m.change}</p>
+                  { label: 'Total Revenue',   value: `K${totalRevenue.toLocaleString()}`, color: '#D4A017' },
+                  { label: 'Total Orders',    value: orders.length,                       color: '#9B59B6' },
+                  { label: 'Pending Payments',value: pendingPayments.length,              color: '#F39C12' },
+                  { label: 'Total Customers', value: customers.length,                    color: '#27AE60' },
+                ].map(m => (
+                  <div key={m.label} style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: 14, position: 'relative', overflow: 'hidden' }}>
+                    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg,#D4A017,#F5C842)' }} />
+                    <p style={{ fontSize: 10, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>{m.label}</p>
+                    <p style={{ fontFamily: 'serif', fontSize: 32, color: m.color, lineHeight: 1 }}>{m.value}</p>
                   </div>
                 ))}
               </div>
 
-              {/* Chart */}
-              <div className="bg-[#1a1a1a] border border-white/[0.08] rounded-2xl p-4 mb-4">
-                <h3 className="text-sm font-semibold mb-4">📈 Revenue This Week (ZMW)</h3>
-                <div className="flex items-end gap-2 h-20">
-                  {REVENUE_DATA.map((d, i) => (
-                    <div key={d.day} className="flex-1 flex flex-col items-center gap-1">
-                      <div
-                        className="w-full rounded-t-md transition-all"
-                        style={{
-                          height: `${(d.value / maxBar) * 100}%`,
-                          background: i === 5 ? 'linear-gradient(to top,#D4A017,#F5C842)' : 'rgba(212,160,23,0.25)',
-                          minHeight: 4,
-                        }}
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-2 mt-2">
-                  {REVENUE_DATA.map((d) => (
-                    <div key={d.day} className="flex-1 text-center text-[9px] text-[#88887f]">{d.day}</div>
-                  ))}
-                </div>
-              </div>
-
               {/* Recent orders */}
-              <div className="bg-[#1a1a1a] border border-white/[0.08] rounded-2xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-                  <h3 className="text-sm font-semibold">Recent Orders</h3>
-                  <button onClick={() => setActive('orders')} className="text-xs text-[#D4A017]">View All →</button>
+              <div style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, overflow: 'hidden' }}>
+                <div style={{ padding: '12px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', fontSize: 13, fontWeight: 600 }}>
+                  Recent Orders {orders.length === 0 && <span style={{ fontSize: 11, color: '#888' }}>— no orders yet</span>}
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead><tr className="text-[#88887f] uppercase tracking-wider border-b border-white/[0.06]">
-                      {['ID','Client','Service','Amount','Status'].map(h => <th key={h} className="text-left px-4 py-2.5 font-medium whitespace-nowrap">{h}</th>)}
-                    </tr></thead>
-                    <tbody>
-                      {DEMO_ORDERS.map((o) => (
-                        <tr key={o.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
-                          <td className="px-4 py-3 font-mono text-[#D4A017]">{o.id}</td>
-                          <td className="px-4 py-3">{o.client}</td>
-                          <td className="px-4 py-3 text-[#88887f]">{o.service}</td>
-                          <td className="px-4 py-3 font-bold">K{o.amount}</td>
-                          <td className="px-4 py-3">
-                            <span className={`status-pill text-[9px] font-bold px-2 py-1 rounded-full ${statusColor(o.status)}`}>
-                              {o.status.replace(/_/g, ' ')}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                {orders.slice(0,5).map(o => (
+                  <div key={o.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 12 }}>
+                    <div>
+                      <p style={{ fontWeight: 600 }}>{o.userName}</p>
+                      <p style={{ color: '#888', fontSize: 11 }}>{o.serviceName}</p>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <p style={{ color: '#D4A017', fontWeight: 700 }}>K{o.amount}</p>
+                      <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 50, background: `${STATUS_COLORS[o.status]}20`, color: STATUS_COLORS[o.status] }}>
+                        {o.status?.replace(/_/g,' ')}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {orders.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: '#888', fontSize: 13 }}>No orders yet. Share your site to get customers! 🚀</div>}
               </div>
             </div>
           )}
 
-          {/* ===== ORDERS ===== */}
+          {/* ORDERS */}
           {active === 'orders' && (
             <div>
-              <h1 className="font-syne text-xl font-extrabold mb-5">Orders <span className="text-[#D4A017]">Management</span></h1>
-              <div className="bg-[#1a1a1a] border border-white/[0.08] rounded-2xl overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead><tr className="text-[#88887f] uppercase tracking-wider border-b border-white/[0.06]">
-                      {['Order ID','Client','Service','Amount','Status','Action'].map(h => <th key={h} className="text-left px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}
-                    </tr></thead>
-                    <tbody>
-                      {DEMO_ORDERS.map((o) => (
-                        <tr key={o.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
-                          <td className="px-4 py-3 font-mono text-[#D4A017]">{o.id}</td>
-                          <td className="px-4 py-3 font-medium">{o.client}</td>
-                          <td className="px-4 py-3 text-[#88887f]">{o.service}</td>
-                          <td className="px-4 py-3 font-bold">K{o.amount}</td>
-                          <td className="px-4 py-3">
-                            <span className={`status-pill text-[9px] font-bold px-2 py-1 rounded-full ${statusColor(o.status)}`}>
-                              {o.status.replace(/_/g, ' ')}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <select className="bg-[#222] border border-white/[0.08] rounded-lg px-2 py-1 text-[10px] text-white cursor-pointer focus:outline-none focus:border-[rgba(212,160,23,0.4)]"
-                              defaultValue={o.status}
-                              onChange={(e) => toast.success(`Status updated to: ${e.target.value.replace(/_/g,' ')}`)}>
-                              {['pending','payment_reviewing','approved','in_progress','ready','delivered','revision_requested'].map(s => (
-                                <option key={s} value={s}>{s.replace(/_/g,' ')}</option>
-                              ))}
-                            </select>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ===== PAYMENTS ===== */}
-          {active === 'payments' && (
-            <div>
-              <h1 className="font-syne text-xl font-extrabold mb-5">Payment <span className="text-[#D4A017]">Approvals</span></h1>
-              {pendingPayments.length === 0 ? (
-                <div className="text-center py-16 text-[#88887f]">
-                  <div className="text-4xl mb-3">✅</div>
-                  <p className="font-semibold">All payments reviewed!</p>
-                  <p className="text-xs mt-1">No pending payment proofs.</p>
+              <h1 style={{ fontFamily: 'serif', fontSize: 22, fontWeight: 800, marginBottom: 16 }}>Orders <span style={{ color: '#D4A017' }}>Management</span></h1>
+              {orders.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>
+                  <div style={{ fontSize: 40, marginBottom: 12 }}>📦</div>
+                  <p style={{ fontWeight: 600 }}>No orders yet</p>
+                  <p style={{ fontSize: 12, marginTop: 4 }}>Orders will appear here in real-time when customers request services</p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {pendingPayments.map((p) => (
-                    <motion.div
-                      key={p.id}
-                      layout
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, x: -100 }}
-                      className="bg-[#1a1a1a] border border-yellow-400/20 rounded-2xl p-4"
-                    >
-                      <div className="flex items-start justify-between mb-3">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {orders.map(o => (
+                    <div key={o.id} style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: 14 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                         <div>
-                          <p className="font-semibold text-sm">{p.userName} — {p.serviceName}</p>
-                          <p className="text-xs text-[#88887f] mt-0.5">{p.method} · <span className="text-[#D4A017] font-bold">K{p.amount}</span> · Proof uploaded</p>
+                          <p style={{ fontSize: 13, fontWeight: 600 }}>{o.userName}</p>
+                          <p style={{ fontSize: 11, color: '#888' }}>{o.serviceName} · K{o.amount}</p>
+                          {o.description && <p style={{ fontSize: 11, color: '#888', marginTop: 4, fontStyle: 'italic' }}>"{o.description?.slice(0,80)}..."</p>}
                         </div>
-                        <span className="status-pill status-reviewing text-[9px] font-bold px-2 py-1 rounded-full">Reviewing</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: '4px 8px', borderRadius: 50, height: 'fit-content', background: `${STATUS_COLORS[o.status]}20`, color: STATUS_COLORS[o.status] }}>
+                          {o.status?.replace(/_/g,' ')}
+                        </span>
                       </div>
-                      <div className="bg-[#222] border border-white/[0.08] rounded-xl p-3 text-xs text-[#88887f] mb-3 flex items-center gap-2">
-                        📎 payment_proof_{p.userName.toLowerCase().replace(' ','_')}.jpg
-                        <a href={p.proofUrl} className="text-[#D4A017] ml-auto" target="_blank" rel="noreferrer">View Proof →</a>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => handleApprove(p)} className="flex-1 bg-green-500/20 border border-green-500/30 text-green-400 rounded-xl py-2.5 text-xs font-bold hover:bg-green-500/30 transition-colors">
-                          ✓ Approve & Unlock Download
-                        </button>
-                        <button onClick={() => handleReject(p)} className="flex-1 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl py-2.5 text-xs font-bold hover:bg-red-500/20 transition-colors">
-                          ✕ Reject
-                        </button>
-                      </div>
-                    </motion.div>
+                      <select defaultValue={o.status} onChange={e => updateOrderStatus(o.id, e.target.value)}
+                        style={{ width: '100%', background: '#222', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#F0EDE6', cursor: 'pointer', outline: 'none' }}>
+                        {['pending','payment_reviewing','approved','in_progress','ready','delivered','revision_requested','rejected'].map(s => (
+                          <option key={s} value={s}>{s.replace(/_/g,' ')}</option>
+                        ))}
+                      </select>
+                    </div>
                   ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* ===== AI TOOLS ===== */}
-          {active === 'ai' && (
+          {/* PAYMENTS */}
+          {active === 'payments' && (
             <div>
-              <div className="flex items-center gap-2 mb-5">
-                <Cpu size={20} className="text-[#D4A017]" />
-                <h1 className="font-syne text-xl font-extrabold">AI <span className="text-[#D4A017]">Tools</span></h1>
-                <span className="text-[10px] bg-[rgba(212,160,23,0.1)] border border-[rgba(212,160,23,0.2)] text-[#D4A017] px-2 py-0.5 rounded-full">ADMIN ONLY</span>
-              </div>
-
-              {/* Tool grid */}
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-5">
-                {AI_TOOLS.map((t) => (
-                  <button
-                    key={t.key}
-                    onClick={() => { setAiTool(t.key); setAiResult(''); setAiPrompt('') }}
-                    className={`bg-[#1a1a1a] border rounded-2xl p-4 text-left transition-all hover:-translate-y-1 ${
-                      aiTool === t.key ? 'border-[rgba(212,160,23,0.5)] bg-[rgba(212,160,23,0.05)]' : 'border-white/[0.08]'
-                    }`}
-                  >
-                    <div className="text-2xl mb-2">{t.icon}</div>
-                    <p className="text-sm font-semibold mb-1">{t.label}</p>
-                    <p className="text-[11px] text-[#88887f]">{t.desc}</p>
-                  </button>
-                ))}
-              </div>
-
-              {/* Generator */}
-              <div className="bg-[#1a1a1a] border border-white/[0.08] rounded-2xl p-4">
-                <h3 className="text-sm font-bold text-[#D4A017] mb-3">
-                  {AI_TOOLS.find((t) => t.key === aiTool)?.icon} {AI_TOOLS.find((t) => t.key === aiTool)?.label}
-                </h3>
-                <textarea
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder="Describe the business, product, or service... e.g. 'A premium logo design for a Zambian clothing brand called Lusaka Threads targeting young professionals'"
-                  rows={3}
-                  className="input-dark px-4 py-3 text-sm mb-3 resize-none"
-                />
-                <button
-                  onClick={generateAI}
-                  disabled={aiLoading}
-                  className="btn-gold w-full py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2"
-                >
-                  {aiLoading ? (
-                    <><span className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" /> Generating...</>
-                  ) : (
-                    '🚀 Generate with AI'
-                  )}
-                </button>
-
-                {aiResult && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="mt-3 bg-[#222] border border-[rgba(212,160,23,0.15)] rounded-xl p-4 text-sm text-[#F0EDE6] leading-relaxed whitespace-pre-line"
-                  >
-                    {aiResult}
-                    <div className="flex gap-2 mt-3">
-                      <button onClick={() => { navigator.clipboard.writeText(aiResult); toast.success('Copied!') }} className="text-[11px] text-[#D4A017] border border-[rgba(212,160,23,0.3)] px-3 py-1.5 rounded-lg hover:bg-[rgba(212,160,23,0.1)] transition-colors">
-                        📋 Copy
-                      </button>
-                      <button onClick={() => setAiResult('')} className="text-[11px] text-[#88887f] border border-white/[0.08] px-3 py-1.5 rounded-lg hover:bg-white/[0.05] transition-colors">
-                        🔄 Clear
-                      </button>
+              <h1 style={{ fontFamily: 'serif', fontSize: 22, fontWeight: 800, marginBottom: 16 }}>Payments <span style={{ color: '#D4A017' }}>Approvals</span></h1>
+              {pendingPayments.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>
+                  <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+                  <p style={{ fontWeight: 600 }}>All payments reviewed!</p>
+                  <p style={{ fontSize: 12, marginTop: 4 }}>New payment proofs will appear here in real-time</p>
+                </div>
+              ) : pendingPayments.map(p => (
+                <div key={p.id} style={{ background: '#1a1a1a', border: '1px solid rgba(243,156,18,0.3)', borderRadius: 16, padding: 14, marginBottom: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div>
+                      <p style={{ fontSize: 13, fontWeight: 600 }}>{p.userName}</p>
+                      <p style={{ fontSize: 11, color: '#888' }}>{p.method?.replace(/_/g,' ')} · <span style={{ color: '#D4A017', fontWeight: 700 }}>K{p.amount}</span></p>
                     </div>
-                  </motion.div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* ===== SETTINGS ===== */}
-          {active === 'settings' && (
-            <div>
-              <h1 className="font-syne text-xl font-extrabold mb-5">System <span className="text-[#D4A017]">Settings</span></h1>
-              <div className="space-y-4 max-w-lg">
-                {[
-                  { title: 'Payment Details', items: [
-                    { label: 'Airtel Money', value: process.env.NEXT_PUBLIC_AIRTEL_NUMBER || '0570109056' },
-                    { label: 'MTN Money',    value: process.env.NEXT_PUBLIC_MTN_NUMBER || '0761468402' },
-                    { label: 'Access Bank',  value: process.env.NEXT_PUBLIC_BANK_ACCOUNT || '0136496126029' },
-                  ]},
-                  { title: 'Contact Info', items: [
-                    { label: 'WhatsApp',  value: process.env.NEXT_PUBLIC_WHATSAPP || '0772799672' },
-                    { label: 'Facebook',  value: 'DjTizzyBeats' },
-                  ]},
-                ].map((section) => (
-                  <div key={section.title} className="bg-[#1a1a1a] border border-white/[0.08] rounded-2xl overflow-hidden">
-                    <div className="px-4 py-3 border-b border-white/[0.06]">
-                      <h3 className="text-sm font-semibold">{section.title}</h3>
-                    </div>
-                    {section.items.map((item) => (
-                      <div key={item.label} className="flex items-center justify-between px-4 py-3 border-b last:border-b-0 border-white/[0.04] text-sm">
-                        <span className="text-[#88887f]">{item.label}</span>
-                        <span className="text-[#D4A017] font-semibold font-mono">{item.value}</span>
-                      </div>
-                    ))}
+                    <span style={{ fontSize: 9, fontWeight: 700, padding: '4px 8px', borderRadius: 50, background: 'rgba(52,152,219,0.15)', color: '#3498DB' }}>Reviewing</span>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Messages admin placeholder */}
-          {active === 'messages' && (
-            <div>
-              <h1 className="font-syne text-xl font-extrabold mb-5">Customer <span className="text-[#D4A017]">Messages</span></h1>
-              {[
-                { initials: 'BK', name: 'Bupe Kumwenda', preview: "Can I get a discount on the branding package?", time: '2m ago', unread: 2 },
-                { initials: 'CM', name: 'Chanda Mutale',  preview: "When will my logo be ready? I need it urgently.", time: '1h ago', unread: 0 },
-                { initials: 'MT', name: 'Mwamba Tembo',   preview: "The flyer looks amazing! Can we do a revision?", time: '3h ago', unread: 1 },
-              ].map((c) => (
-                <div key={c.name} className="flex items-center gap-3 p-4 bg-[#1a1a1a] border border-white/[0.08] rounded-2xl mb-2 cursor-pointer hover:border-[rgba(212,160,23,0.3)] transition-all">
-                  <div className="w-10 h-10 rounded-full bg-gold-gradient flex items-center justify-center font-bold text-black text-sm flex-shrink-0">{c.initials}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-0.5">
-                      <p className="text-sm font-semibold">{c.name}</p>
-                      <p className="text-[10px] text-[#88887f]">{c.time}</p>
-                    </div>
-                    <p className="text-xs text-[#88887f] truncate">{c.preview}</p>
-                  </div>
-                  {c.unread > 0 && (
-                    <div className="w-5 h-5 bg-[#D4A017] rounded-full flex items-center justify-center text-black text-[9px] font-bold flex-shrink-0">{c.unread}</div>
+                  {p.proofUrl && p.proofUrl !== 'demo_proof_url' && (
+                    <a href={p.proofUrl} target="_blank" rel="noreferrer" style={{ display: 'block', background: '#222', borderRadius: 8, padding: '8px 12px', fontSize: 11, color: '#D4A017', marginBottom: 8, textDecoration: 'none' }}>
+                      📎 View Payment Proof →
+                    </a>
                   )}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => approvePayment(p)} style={{ flex: 1, background: 'rgba(39,174,96,0.2)', border: '1px solid rgba(39,174,96,0.3)', borderRadius: 10, padding: '10px', fontSize: 12, fontWeight: 700, color: '#27AE60', cursor: 'pointer' }}>
+                      ✓ Approve & Unlock
+                    </button>
+                    <button onClick={() => rejectPayment(p)} style={{ flex: 1, background: 'rgba(231,76,60,0.1)', border: '1px solid rgba(231,76,60,0.2)', borderRadius: 10, padding: '10px', fontSize: 12, fontWeight: 700, color: '#E74C3C', cursor: 'pointer' }}>
+                      ✕ Reject
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Customers placeholder */}
+          {/* CUSTOMERS */}
           {active === 'customers' && (
             <div>
-              <h1 className="font-syne text-xl font-extrabold mb-5">Customers <span className="text-[#D4A017]">List</span></h1>
-              <div className="bg-[#1a1a1a] border border-white/[0.08] rounded-2xl overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead><tr className="text-[#88887f] uppercase tracking-wider border-b border-white/[0.06]">
-                    {['Name','Email','Phone','Orders','Joined'].map(h => <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {[
-                      { name: 'Chanda Mutale', email: 'chanda@email.com',   phone: '0971234567', orders: 3, joined: 'Jan 2025' },
-                      { name: 'Bupe Kumwenda', email: 'bupe@email.com',     phone: '0961234567', orders: 1, joined: 'Mar 2025' },
-                      { name: 'Mwamba Tembo',  email: 'mwamba@email.com',   phone: '0951234567', orders: 5, joined: 'Feb 2025' },
-                      { name: 'Lombe Phiri',   email: 'lombe@email.com',    phone: '0941234567', orders: 2, joined: 'Apr 2025' },
-                    ].map((c) => (
-                      <tr key={c.name} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
-                        <td className="px-4 py-3 font-medium">{c.name}</td>
-                        <td className="px-4 py-3 text-[#88887f]">{c.email}</td>
-                        <td className="px-4 py-3 text-[#88887f]">{c.phone}</td>
-                        <td className="px-4 py-3 text-[#D4A017] font-bold">{c.orders}</td>
-                        <td className="px-4 py-3 text-[#88887f]">{c.joined}</td>
-                      </tr>
+              <h1 style={{ fontFamily: 'serif', fontSize: 22, fontWeight: 800, marginBottom: 16 }}>Customers <span style={{ color: '#D4A017' }}>({customers.length})</span></h1>
+              {customers.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>
+                  <div style={{ fontSize: 40, marginBottom: 12 }}>👥</div>
+                  <p style={{ fontWeight: 600 }}>No customers yet</p>
+                  <p style={{ fontSize: 12, marginTop: 4 }}>Customers appear here when they register</p>
+                </div>
+              ) : customers.map(c => (
+                <div key={c.id} style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, padding: '12px 14px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'linear-gradient(135deg,#D4A017,#F5C842)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#000', flexShrink: 0 }}>
+                    {c.displayName?.[0] || 'U'}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.displayName}</p>
+                    <p style={{ fontSize: 11, color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.email}</p>
+                  </div>
+                  <span style={{ fontSize: 9, fontWeight: 700, padding: '3px 8px', borderRadius: 50, background: c.role === 'admin' ? 'rgba(212,160,23,0.2)' : 'rgba(255,255,255,0.08)', color: c.role === 'admin' ? '#D4A017' : '#888', flexShrink: 0 }}>
+                    {c.role}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* MESSAGES */}
+          {active === 'messages' && (
+            <div>
+              <h1 style={{ fontFamily: 'serif', fontSize: 22, fontWeight: 800, marginBottom: 16 }}>Customer <span style={{ color: '#D4A017' }}>Messages</span></h1>
+              {messages.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>
+                  <div style={{ fontSize: 40, marginBottom: 12 }}>💬</div>
+                  <p style={{ fontWeight: 600 }}>No messages yet</p>
+                  <p style={{ fontSize: 12, marginTop: 4 }}>Customer messages appear here in real-time</p>
+                </div>
+              ) : messages.map(m => (
+                <div key={m.id} style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, padding: '12px 14px', marginBottom: 8, cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600 }}>{m.participants?.[0] || 'Customer'}</p>
+                    <p style={{ fontSize: 10, color: '#888' }}>
+                      {m.lastMessageAt?.toDate?.()?.toLocaleTimeString?.() || ''}
+                    </p>
+                  </div>
+                  <p style={{ fontSize: 11, color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.lastMessage || 'New conversation'}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* AI TOOLS */}
+          {active === 'ai' && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                <Cpu size={20} color="#D4A017" />
+                <h1 style={{ fontFamily: 'serif', fontSize: 22, fontWeight: 800 }}>AI <span style={{ color: '#D4A017' }}>Tools</span></h1>
+                <span style={{ fontSize: 10, background: 'rgba(212,160,23,0.1)', border: '1px solid rgba(212,160,23,0.2)', color: '#D4A017', padding: '2px 8px', borderRadius: 50 }}>ADMIN ONLY</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+                {AI_TOOLS.map(t => (
+                  <button key={t.key} onClick={() => { setAiTool(t); setAiResult(''); setAiPrompt('') }}
+                    style={{ background: aiTool.key === t.key ? 'rgba(212,160,23,0.08)' : '#1a1a1a', border: `1px solid ${aiTool.key === t.key ? 'rgba(212,160,23,0.5)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 14, padding: 12, cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s' }}>
+                    <div style={{ fontSize: 22, marginBottom: 6 }}>{t.icon}</div>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#F0EDE6', marginBottom: 2 }}>{t.label}</p>
+                  </button>
+                ))}
+              </div>
+              <div style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: 14 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#D4A017', marginBottom: 10 }}>{aiTool.icon} {aiTool.label}</p>
+                <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)}
+                  placeholder={aiTool.prompt}
+                  rows={3}
+                  style={{ width: '100%', background: '#222', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '10px 12px', color: '#F0EDE6', fontSize: 13, resize: 'none', outline: 'none', marginBottom: 10, fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                <button onClick={generateAI} disabled={aiLoading}
+                  style={{ width: '100%', background: 'linear-gradient(135deg,#D4A017,#F5C842)', color: '#000', border: 'none', borderRadius: 12, padding: 12, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  {aiLoading ? <><span style={{ width: 16, height: 16, border: '2px solid rgba(0,0,0,0.2)', borderTop: '2px solid #000', borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block' }} /> Generating...</> : '🚀 Generate with AI'}
+                </button>
+                {aiResult && (
+                  <div style={{ marginTop: 12, background: '#222', border: '1px solid rgba(212,160,23,0.15)', borderRadius: 10, padding: 12, fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                    {aiResult}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                      <button onClick={() => { navigator.clipboard.writeText(aiResult); toast.success('Copied!') }}
+                        style={{ fontSize: 11, color: '#D4A017', border: '1px solid rgba(212,160,23,0.3)', background: 'none', padding: '6px 12px', borderRadius: 8, cursor: 'pointer' }}>📋 Copy</button>
+                      <button onClick={() => setAiResult('')}
+                        style={{ fontSize: 11, color: '#888', border: '1px solid rgba(255,255,255,0.08)', background: 'none', padding: '6px 12px', borderRadius: 8, cursor: 'pointer' }}>🔄 Clear</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* SETTINGS */}
+          {active === 'settings' && (
+            <div>
+              <h1 style={{ fontFamily: 'serif', fontSize: 22, fontWeight: 800, marginBottom: 16 }}>System <span style={{ color: '#D4A017' }}>Settings</span></h1>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {[
+                  { title: 'Payment Details', items: [
+                    { label: 'Airtel Money', value: process.env.NEXT_PUBLIC_AIRTEL_NUMBER || '0570109056' },
+                    { label: 'MTN Money',    value: process.env.NEXT_PUBLIC_MTN_NUMBER   || '0761468402' },
+                    { label: 'Access Bank',  value: process.env.NEXT_PUBLIC_BANK_ACCOUNT || '0136496126029' },
+                  ]},
+                  { title: 'Contact Info', items: [
+                    { label: 'WhatsApp',  value: process.env.NEXT_PUBLIC_WHATSAPP     || '0772799672' },
+                    { label: 'Facebook',  value: 'DjTizzyBeats' },
+                    { label: 'Admin Email', value: user?.email || '' },
+                  ]},
+                ].map(section => (
+                  <div key={section.title} style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, overflow: 'hidden' }}>
+                    <div style={{ padding: '12px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', fontSize: 13, fontWeight: 600 }}>{section.title}</div>
+                    {section.items.map(item => (
+                      <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 12 }}>
+                        <span style={{ color: '#888' }}>{item.label}</span>
+                        <span style={{ color: '#D4A017', fontWeight: 700, fontFamily: 'monospace' }}>{item.value}</span>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                ))}
+                <button onClick={handleLogout} style={{ background: 'rgba(231,76,60,0.1)', border: '1px solid rgba(231,76,60,0.2)', borderRadius: 14, padding: '14px', fontSize: 14, fontWeight: 700, color: '#E74C3C', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <LogOut size={16} /> Sign Out of Admin
+                </button>
               </div>
             </div>
           )}
 
         </div>
       </main>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
