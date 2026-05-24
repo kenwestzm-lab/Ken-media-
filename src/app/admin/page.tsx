@@ -197,8 +197,8 @@ export default function AdminPage() {
         </nav>
 
         <div style={{ padding: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, fontSize: 12, color: '#888', textDecoration: 'none', marginBottom: 4 }}>
-            🏠 View Site
+          <Link href="/admin/upload" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, fontSize: 12, color: '#888', textDecoration: 'none', marginBottom: 4 }}>
+            📤 Upload Post
           </Link>
           <button onClick={handleLogout} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer', fontSize: 12, color: '#E74C3C', background: 'rgba(231,76,60,0.08)', border: 'none', fontWeight: 600 }}>
             <LogOut size={15} /> Sign Out
@@ -472,3 +472,4 @@ export default function AdminPage() {
     </div>
   )
 }
+// Profile photo upload added via Settings section

@@ -1,93 +1,98 @@
 'use client'
-// src/app/messages/page.tsx
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Send, Paperclip, Phone } from 'lucide-react'
-import Navbar from '@/components/ui/Navbar'
-import BottomNav from '@/components/ui/BottomNav'
-import { subscribeToMessages, sendMessage } from '@/lib/firestore'
-import useStore from '@/store/useStore'
+import { Send, Paperclip, Phone, Video, MoreVertical, ArrowLeft, Check, CheckCheck } from 'lucide-react'
+import dynamic from 'next/dynamic'
 import toast from 'react-hot-toast'
-import { format } from 'date-fns'
+import { db, auth } from '@/lib/firebase'
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, increment } from 'firebase/firestore'
 
+const BottomNav = dynamic(() => import('@/components/ui/BottomNav'), { ssr: false })
+
+const CONV_ID = 'support'
 const ADMIN_UID = 'admin'
-const ADMIN_CONV_ID = 'support'
 
-const INITIAL_MESSAGES = [
-  { id: 'w1', senderId: ADMIN_UID, text: '👋 Hello! Welcome to Ken Media Creative Studio. How can we help you today?', createdAt: { toDate: () => new Date(Date.now() - 3600000) }, read: true },
-]
+const WELCOME = {
+  id: 'welcome',
+  senderId: ADMIN_UID,
+  text: '👋 Hello! Welcome to Ken Media Creative Studio. How can we help you today?\n\nServices: Logo Design, Flyers, Branding, Motion Posters, Websites & more.',
+  createdAt: { toDate: () => new Date(Date.now() - 3600000) },
+  read: true,
+}
 
 export default function MessagesPage() {
-  const { user } = useStore()
-  const [messages, setMessages] = useState<any[]>(INITIAL_MESSAGES)
-  const [text, setText] = useState('')
-  const [typing, setTyping] = useState(false)
-  const [sending, setSending] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [messages, setMessages] = useState<any[]>([WELCOME])
+  const [text, setText]         = useState('')
+  const [typing, setTyping]     = useState(false)
+  const [sending, setSending]   = useState(false)
+  const [file, setFile]         = useState<File | null>(null)
+  const endRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const user = auth.currentUser
+  const wa = process.env.NEXT_PUBLIC_WHATSAPP || '0772799672'
 
   useEffect(() => {
     if (!user) return
-    const unsub = subscribeToMessages(ADMIN_CONV_ID, (msgs) => {
-      if (msgs.length > 0) setMessages([...INITIAL_MESSAGES, ...msgs])
-    })
+    const q = query(collection(db, 'messages', CONV_ID, 'chats'), orderBy('createdAt', 'asc'))
+    const unsub = onSnapshot(q, snap => {
+      const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      setMessages(msgs.length > 0 ? msgs : [WELCOME])
+    }, () => {})
     return () => unsub()
   }, [user])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, typing])
 
   const handleSend = async () => {
-    if (!text.trim()) return
+    const msg = text.trim()
+    if (!msg && !file) return
     if (!user) { toast.error('Sign in to send messages'); return }
 
-    const msgText = text.trim()
-    setText('')
-    setSending(true)
-
-    // Optimistic UI
     const optimistic = {
       id: 'opt-' + Date.now(),
       senderId: user.uid,
-      text: msgText,
+      text: msg,
       createdAt: { toDate: () => new Date() },
       read: false,
+      pending: true,
     }
-    setMessages((prev) => [...prev, optimistic])
+    setMessages(prev => [...prev, optimistic])
+    setText('')
+    setSending(true)
 
     try {
-      await sendMessage(ADMIN_CONV_ID, {
+      await addDoc(collection(db, 'messages', CONV_ID, 'chats'), {
         senderId: user.uid,
         receiverId: ADMIN_UID,
-        senderName: user.displayName,
-        text: msgText,
+        senderName: user.displayName || 'Customer',
+        text: msg,
         read: false,
+        createdAt: serverTimestamp(),
       })
-    } catch {
-      toast.error('Failed to send message')
-    } finally {
-      setSending(false)
-    }
 
-    // Simulate admin typing & reply (demo mode)
-    setTimeout(() => setTyping(true), 1000)
-    const replies = [
-      '✅ Got it! We\'ll get back to you shortly.',
-      '🎨 Thanks for reaching out! Our team will assist you soon.',
-      '⚡ Message received! Expect a response within 1-2 hours.',
-      '👑 Great question! Let me check that for you.',
-      'Perfect! We love working with new clients. Let\'s create something amazing 🚀',
-    ]
-    setTimeout(() => {
-      setTyping(false)
-      setMessages((prev) => [...prev, {
-        id: 'reply-' + Date.now(),
-        senderId: ADMIN_UID,
-        text: replies[Math.floor(Math.random() * replies.length)],
-        createdAt: { toDate: () => new Date() },
-        read: true,
-      }])
-    }, 2500 + Math.random() * 1500)
+      // Auto-reply after 2-4 seconds
+      setTimeout(() => setTyping(true), 1500)
+      const replies = [
+        `Thanks for reaching out! 😊 We'll respond shortly.\n\nOr chat us on WhatsApp: ${wa}`,
+        '✅ Got it! Our team will get back to you within the hour.',
+        `Great! For faster response, WhatsApp us directly: 0${wa}`,
+        '🎨 We love hearing from clients! Preparing a response...',
+        `Perfect! You can also reach us on WhatsApp: ${wa} for immediate help.`,
+      ]
+      setTimeout(() => {
+        setTyping(false)
+        setMessages(prev => [...prev, {
+          id: 'auto-' + Date.now(),
+          senderId: ADMIN_UID,
+          text: replies[Math.floor(Math.random() * replies.length)],
+          createdAt: { toDate: () => new Date() },
+          read: true,
+        }])
+      }, 3000 + Math.random() * 2000)
+    } catch { toast.error('Failed to send') }
+    finally { setSending(false) }
   }
 
   const handleKey = (e: React.KeyboardEvent) => {
@@ -95,105 +100,127 @@ export default function MessagesPage() {
   }
 
   const formatTime = (ts: any) => {
-    try {
-      return format(ts.toDate(), 'HH:mm')
-    } catch { return '' }
+    try { return ts.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+    catch { return '' }
   }
 
-  return (
-    <div className="h-screen bg-dark flex flex-col">
-      <Navbar />
+  const isMe = (msg: any) => user && msg.senderId === user.uid
 
-      {/* Chat header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/[0.08] bg-[#111] flex-shrink-0">
-        <div className="relative">
-          <div className="w-10 h-10 rounded-full bg-gold-gradient flex items-center justify-center font-bold text-black text-sm">KM</div>
-          <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-[#111]" />
+  return (
+    <div style={{ height: '100vh', background: '#0a0a0a', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+      {/* WhatsApp-style header */}
+      <div style={{ background: '#1a1a1a', borderBottom: '1px solid rgba(255,255,255,0.06)', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        <div style={{ position: 'relative' }}>
+          <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'linear-gradient(135deg,#D4A017,#F5C842)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#000', fontSize: 14 }}>KM</div>
+          <div style={{ position: 'absolute', bottom: 1, right: 1, width: 11, height: 11, background: '#25D366', borderRadius: '50%', border: '2px solid #1a1a1a' }} />
         </div>
-        <div className="flex-1">
-          <h3 className="text-sm font-semibold">Ken Media Studio 👑</h3>
-          <p className="text-[11px] text-green-400">Online · Usually replies in minutes</p>
+        <div style={{ flex: 1 }}>
+          <p style={{ fontSize: 15, fontWeight: 700 }}>Ken Media Studio 👑</p>
+          <p style={{ fontSize: 11, color: '#25D366' }}>Online • Usually replies in minutes</p>
         </div>
-        <a href={`tel:+260${(process.env.NEXT_PUBLIC_WHATSAPP || '0772799672').replace(/^0/,'')}`} className="p-2 rounded-full bg-white/[0.06] text-[#D4A017]">
-          <Phone size={16} />
-        </a>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <a href={`tel:+260${wa.replace(/^0/,'')}`} style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#D4A017', textDecoration: 'none' }}>
+            <Phone size={16} />
+          </a>
+          <a href={`https://wa.me/260${wa.replace(/^0/,'')}?text=${encodeURIComponent("Hello Ken Media! I'd like to inquire about your services.")}`} target="_blank" rel="noreferrer"
+            style={{ width: 36, height: 36, borderRadius: '50%', background: '#25D366', display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+          </a>
+        </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ overflowAnchor: 'auto' }}>
+      {/* WhatsApp background pattern */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 10px', background: '#0d1117', backgroundImage: 'radial-gradient(rgba(212,160,23,0.03) 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
+
         {!user && (
-          <div className="text-center py-4">
-            <div className="bg-[rgba(212,160,23,0.08)] border border-[rgba(212,160,23,0.2)] rounded-xl px-4 py-3 text-xs text-[#D4A017]">
-              Sign in to send messages and get personalized support
-            </div>
+          <div style={{ background: 'rgba(212,160,23,0.1)', border: '1px solid rgba(212,160,23,0.2)', borderRadius: 12, padding: '10px 14px', marginBottom: 12, fontSize: 12, color: '#D4A017', textAlign: 'center' }}>
+            <a href="/auth/login" style={{ color: '#D4A017', fontWeight: 700 }}>Sign in</a> to send messages & get personalized support
           </div>
         )}
 
-        {messages.map((msg) => {
-          const isMe = user && msg.senderId === user.uid
+        {/* Date divider */}
+        <div style={{ textAlign: 'center', marginBottom: 12 }}>
+          <span style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 50, padding: '3px 10px', fontSize: 11, color: '#888' }}>Today</span>
+        </div>
+
+        {messages.map((msg, i) => {
+          const mine = isMe(msg)
           return (
-            <motion.div
-              key={msg.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
-            >
-              <div className={`max-w-[78%] ${isMe ? 'items-end' : 'items-start'} flex flex-col`}>
-                <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                  isMe
-                    ? 'bg-gold-gradient text-black font-medium rounded-br-sm'
-                    : 'bg-[#1a1a1a] border border-white/[0.08] rounded-bl-sm'
-                }`}>
+            <motion.div key={msg.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
+              style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom: 4 }}>
+              <div style={{ maxWidth: '78%' }}>
+                <div style={{
+                  padding: '8px 12px',
+                  borderRadius: mine ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                  background: mine ? 'linear-gradient(135deg,#D4A017,#c49015)' : '#1e2128',
+                  color: mine ? '#000' : '#F0EDE6',
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                  fontWeight: mine ? 500 : 400,
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+                  whiteSpace: 'pre-line',
+                }}>
                   {msg.text}
                 </div>
-                <span className={`text-[10px] text-[#88887f] mt-1 ${isMe ? 'mr-1' : 'ml-1'}`}>
-                  {formatTime(msg.createdAt)}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2, justifyContent: mine ? 'flex-end' : 'flex-start', paddingRight: mine ? 4 : 0, paddingLeft: mine ? 0 : 4 }}>
+                  <span style={{ fontSize: 10, color: '#555' }}>{formatTime(msg.createdAt)}</span>
+                  {mine && (
+                    msg.pending
+                      ? <Check size={12} color="#555" />
+                      : <CheckCheck size={12} color="#D4A017" />
+                  )}
+                </div>
               </div>
             </motion.div>
           )
         })}
 
-        {/* Typing indicator */}
         {typing && (
-          <div className="flex justify-start">
-            <div className="bg-[#1a1a1a] border border-white/[0.08] rounded-2xl rounded-bl-sm px-4 py-3 flex gap-1.5 items-center">
-              <div className="typing-dot" />
-              <div className="typing-dot" />
-              <div className="typing-dot" />
+          <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 8 }}>
+            <div style={{ background: '#1e2128', borderRadius: '18px 18px 18px 4px', padding: '10px 14px', display: 'flex', gap: 4, alignItems: 'center' }}>
+              {[0,1,2].map(i => <div key={i} className="typing-dot" style={{ animationDelay: `${i * 0.2}s` }} />)}
             </div>
           </div>
         )}
 
-        <div ref={messagesEndRef} />
+        <div ref={endRef} />
       </div>
 
-      {/* Input */}
-      <div className="px-4 py-3 border-t border-white/[0.08] bg-dark flex-shrink-0 pb-safe-bottom" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
-        <div className="flex gap-2 items-end">
-          <button className="p-2.5 rounded-full bg-white/[0.06] text-[#88887f] flex-shrink-0">
-            <Paperclip size={17} />
-          </button>
+      {/* Input bar — WhatsApp style */}
+      <div style={{ background: '#1a1a1a', borderTop: '1px solid rgba(255,255,255,0.06)', padding: '8px 10px', flexShrink: 0, paddingBottom: 'max(8px, env(safe-area-inset-bottom))' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <label style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+            <Paperclip size={18} color="#888" />
+            <input type="file" accept="image/*,video/*,audio/*" style={{ display: 'none' }} onChange={e => setFile(e.target.files?.[0] || null)} />
+          </label>
           <textarea
+            ref={inputRef}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={e => setText(e.target.value)}
             onKeyDown={handleKey}
             placeholder={user ? 'Type a message...' : 'Sign in to chat...'}
             disabled={!user}
             rows={1}
-            className="flex-1 bg-[#1a1a1a] border border-white/[0.08] focus:border-[rgba(212,160,23,0.4)] rounded-2xl px-4 py-2.5 text-sm text-white placeholder:text-[#88887f] outline-none resize-none max-h-28 disabled:opacity-50 transition-colors"
-            style={{ minHeight: 42 }}
+            style={{ flex: 1, background: '#2a2a2a', border: 'none', borderRadius: 24, padding: '10px 16px', color: '#F0EDE6', fontSize: 14, outline: 'none', resize: 'none', maxHeight: 100, fontFamily: 'inherit', lineHeight: 1.4 }}
           />
-          <button
-            onClick={handleSend}
-            disabled={!text.trim() || !user || sending}
-            className="w-10 h-10 rounded-full bg-gold-gradient flex items-center justify-center text-black flex-shrink-0 disabled:opacity-40 transition-all active:scale-95"
-          >
-            <Send size={16} />
+          <button onClick={handleSend} disabled={!text.trim() || !user || sending}
+            style={{ width: 42, height: 42, borderRadius: '50%', background: text.trim() && user ? '#25D366' : 'rgba(255,255,255,0.08)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, transition: 'background 0.2s' }}>
+            <Send size={18} color={text.trim() && user ? '#fff' : '#555'} />
           </button>
         </div>
-        <p className="text-[10px] text-[#88887f] text-center mt-2">
-          WhatsApp: {process.env.NEXT_PUBLIC_WHATSAPP || '0772799672'}
+
+        {file && (
+          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, background: '#2a2a2a', borderRadius: 8, padding: '6px 10px' }}>
+            <span style={{ fontSize: 18 }}>📎</span>
+            <span style={{ fontSize: 11, color: '#D4A017', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+            <button onClick={() => setFile(null)} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: 14 }}>✕</button>
+          </div>
+        )}
+
+        <p style={{ fontSize: 10, color: '#444', textAlign: 'center', marginTop: 4 }}>
+          WhatsApp: {wa} • 
+          <a href={`https://wa.me/260${wa.replace(/^0/,'')}?text=Hello Ken Media!`} target="_blank" rel="noreferrer" style={{ color: '#25D366', textDecoration: 'none' }}> Chat directly →</a>
         </p>
       </div>
 
