@@ -5,27 +5,13 @@ export async function POST(req: NextRequest) {
     const { prompt, adminId } = await req.json()
     if (!adminId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const HF_TOKEN = process.env.HUGGINGFACE_API_KEY || ''
-    
-    const response = await fetch(
-      'https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${HF_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          inputs: prompt,
-          parameters: { width: 1024, height: 1024, num_inference_steps: 20 }
-        }),
-      }
-    )
+    // Pollinations AI - completely FREE, no API key needed
+    const encodedPrompt = encodeURIComponent(prompt + ', professional, high quality, 4k')
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${Date.now()}`
 
-    if (!response.ok) {
-      const err = await response.text()
-      return NextResponse.json({ error: err }, { status: response.status })
-    }
+    // Fetch the image
+    const response = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) })
+    if (!response.ok) throw new Error('Image generation failed')
 
     const buffer = await response.arrayBuffer()
     const base64 = Buffer.from(buffer).toString('base64')
