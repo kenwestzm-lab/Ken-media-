@@ -4,16 +4,37 @@ export const runtime = 'edge'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
-  const query = searchParams.get('q') || 'africa'
-  const CLIENT_ID = process.env.JAMENDO_CLIENT_ID || '542d63e5'
+  const query = searchParams.get('q') || 'background'
+  const KEY = process.env.PIXABAY_API_KEY || ''
+
+  if (!KEY) {
+    return NextResponse.json({
+      error: 'Add PIXABAY_API_KEY to Vercel environment variables',
+      tracks: [],
+      setup: true
+    })
+  }
 
   try {
     const res = await fetch(
-      `https://api.jamendo.com/v3.0/tracks/?client_id=${CLIENT_ID}&format=json&limit=20&search=${encodeURIComponent(query)}&audioformat=mp32&include=musicinfo`,
+      `https://pixabay.com/api/?key=${KEY}&q=${encodeURIComponent(query)}&media_type=music&per_page=20&safesearch=true`,
       { signal: AbortSignal.timeout(10000) }
     )
     const data = await res.json()
-    return NextResponse.json({ tracks: data.results || [] })
+
+    // Format tracks to match our UI
+    const tracks = (data.hits || []).map((hit: any) => ({
+      id:          String(hit.id),
+      name:        hit.tags?.split(',')[0]?.trim() || 'Track',
+      artist_name: hit.user || 'Pixabay Artist',
+      audio:       hit.downloads ? `https://cdn.pixabay.com/download/audio/${hit.id}/${hit.tags?.split(',')[0]?.trim()?.toLowerCase().replace(/\s/g,'-')}.mp3` : '',
+      preview_url: hit.webformatURL || '',
+      duration:    hit.duration || 120,
+      pageURL:     hit.pageURL,
+      tags:        hit.tags,
+    }))
+
+    return NextResponse.json({ tracks })
   } catch (err: any) {
     return NextResponse.json({ tracks: [], error: err.message })
   }
