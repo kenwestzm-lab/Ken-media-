@@ -5,6 +5,7 @@ import AuthProvider from '@/components/auth/AuthProvider'
 import { Toaster } from 'react-hot-toast'
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://ken-media.vercel.app'),
   title: "Ken Media Creative Studio | Zambia's #1 Creative Agency",
   description: 'Premium logo design, motion posters, branding, video ads and digital services crafted for African businesses. Based in Lusaka, Zambia.',
   keywords: ['graphic design Zambia', 'logo design Lusaka', 'branding Zambia', 'motion graphics', 'Ken Media Creative Studio'],

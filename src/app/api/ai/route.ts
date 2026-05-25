@@ -1,47 +1,56 @@
-// src/app/api/ai/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 
 const TOOL_PROMPTS: Record<string, string> = {
-  caption: 'You are a viral social media copywriter specializing in African businesses. Write an engaging, scroll-stopping social media caption. Use emojis strategically. Max 3 sentences. Include 3 relevant hashtags.',
-  adcopy:  'You are an expert ad copywriter for African markets. Write a compelling Facebook/Instagram ad with a hook, value proposition, and clear CTA. Max 4 sentences.',
-  slogan:  'You are a brand strategist for African businesses. Generate 5 short, memorable, catchy brand slogans. Each on a new line.',
-  brand:   'You are a creative brand consultant. Provide a concise brand identity concept including: color palette, typography, brand personality, and tagline.',
-  desc:    'You are a product description writer. Write an engaging, benefit-focused product description. 3-4 sentences.',
-  script:  'You are a video ad scriptwriter. Write a 15-second social media video ad script with HOOK, VALUE, and CTA.',
+  caption: 'You are a viral social media copywriter for African businesses. Write an engaging scroll-stopping caption with emojis. Max 3 sentences with 3 hashtags.',
+  adcopy:  'You are an ad copywriter for African markets. Write a compelling Facebook/Instagram ad with hook, value, and CTA. Max 4 sentences.',
+  slogan:  'Generate 5 short memorable brand slogans for an African creative studio. One per line.',
+  brand:   'Give a brand identity concept: color palette, typography, personality, tagline.',
+  desc:    'Write an engaging product description for a premium African design pack. 3-4 sentences.',
+  script:  'Write a 15-second video ad script with HOOK, VALUE, CTA format.',
 }
+
+export const runtime = 'edge'
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const { tool, prompt, adminId } = body
+    const { tool, prompt, adminId } = await req.json()
+    if (!adminId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    if (!adminId) {
-      return NextResponse.json({ error: 'Unauthorized — admin only' }, { status: 401 })
+    const OPENAI_KEY = process.env.OPENAI_API_KEY
+    if (!OPENAI_KEY) {
+      // Fallback responses when no OpenAI key
+      const fallbacks: Record<string, string> = {
+        caption: "🔥 Your brand deserves to stand out! At Ken Media Creative Studio, we craft premium designs that stop the scroll and start conversations. Zambian excellence, global standard. 🇿🇲✨ #KenMedia #ZambiaDesign #CreativeStudio",
+        adcopy: "Tired of blending in? Ken Media Creative Studio crafts premium logos, motion posters & branding that makes YOUR business unforgettable. Starting at K150. Message us today! 📲",
+        slogan: "\"Design That Moves, Brands That Speak.\"\n\"Africa's Vision, Global Standard.\"\n\"Where Zambian Creativity Meets World-Class Design.\"\n\"Your Brand, Elevated.\"\n\"Built Different. Designed for Zambia.\"",
+        brand: "Brand Concept:\n🎨 Colors: Royal Gold + Deep Black + Pure White\n✍️ Fonts: Geometric display + Modern sans-serif\n🏷 Personality: Bold, innovative, proudly African\n💡 Tagline: 'Built for Africa, Designed for the World'",
+        desc: "Elevate your brand with our premium design pack — crafted with pixel-perfect precision for Zambian businesses ready to stand out. Includes editable templates, style guide, and print-ready files.",
+        script: "HOOK (0-3s): Your brand is talking. Is it saying the right things?\nVALUE (4-12s): [Show 3 stunning before/after transformations]\nCTA (13-15s): Ken Media Creative Studio. DM us NOW! 🔥",
+      }
+      return NextResponse.json({ result: fallbacks[tool] || fallbacks.caption })
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 500 })
-    }
-
-    // Dynamically import OpenAI to avoid build-time issues
-    const { default: OpenAI } = await import('openai')
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-
-    const systemPrompt = TOOL_PROMPTS[tool] || TOOL_PROMPTS.caption
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Context: ${prompt}\nGenerate content for Ken Media Creative Studio (Zambian creative agency).` },
-      ],
-      max_tokens: 500,
-      temperature: 0.8,
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: TOOL_PROMPTS[tool] || TOOL_PROMPTS.caption },
+          { role: 'user', content: `Context: ${prompt}\nCreate content for Ken Media Creative Studio, a Zambian creative agency.` },
+        ],
+        max_tokens: 500,
+        temperature: 0.8,
+      }),
     })
 
-    const result = completion.choices[0]?.message?.content || ''
+    const data = await response.json()
+    const result = data.choices?.[0]?.message?.content || 'Generation failed'
     return NextResponse.json({ result })
   } catch (err: any) {
-    console.error('AI API error:', err)
-    return NextResponse.json({ error: err.message || 'AI generation failed' }, { status: 500 })
+    return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
