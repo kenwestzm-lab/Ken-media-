@@ -12,6 +12,7 @@
     "@hookform/resolvers": "^3.9.0",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
+    "encoding": "^0.1.13",
     "firebase": "^9.23.0",
     "framer-motion": "^11.3.2",
     "lucide-react": "^0.408.0",
