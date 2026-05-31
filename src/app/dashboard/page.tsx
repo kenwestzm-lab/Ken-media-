@@ -1,192 +1,168 @@
 'use client'
-// src/app/dashboard/page.tsx
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
-import { Package, MessageCircle, Bell, LogOut, Crown, MapPin } from 'lucide-react'
-import Navbar from '@/components/ui/Navbar'
-import BottomNav from '@/components/ui/BottomNav'
-import WhatsAppButton from '@/components/ui/WhatsAppButton'
-import { getOrdersByUser } from '@/lib/firestore'
+import { LogOut } from 'lucide-react'
+import dynamic from 'next/dynamic'
+import { db, auth } from '@/lib/firebase'
+import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore'
 import { logout } from '@/lib/auth'
 import useStore from '@/store/useStore'
 import toast from 'react-hot-toast'
-import { Order } from '@/types'
 
-const STATUS_COLORS: Record<string, string> = {
-  pending:           'status-pending',
-  payment_reviewing: 'status-reviewing',
-  approved:          'status-approved',
-  in_progress:       'status-progress',
-  ready:             'status-ready',
-  delivered:         'status-delivered',
-  rejected:          'status-rejected',
-}
-
-const DEMO_ORDERS: Order[] = [
-  { id: '1042', orderNumber: 'KM-1042', userId: 'u1', userName: 'Demo', userEmail: '', serviceName: 'Logo Design',   amount: 250,  status: 'in_progress',       createdAt: { toDate: () => new Date(Date.now() - 86400000 * 2) } },
-  { id: '1039', orderNumber: 'KM-1039', userId: 'u1', userName: 'Demo', userEmail: '', serviceName: 'Motion Poster', amount: 400,  status: 'delivered',          createdAt: { toDate: () => new Date(Date.now() - 86400000 * 7) } },
-  { id: '1036', orderNumber: 'KM-1036', userId: 'u1', userName: 'Demo', userEmail: '', serviceName: 'Flyer Design',  amount: 120,  status: 'payment_reviewing',  createdAt: { toDate: () => new Date(Date.now() - 86400000 * 1) } },
-]
+const Navbar         = dynamic(() => import('@/components/ui/Navbar'),         { ssr: false })
+const BottomNav      = dynamic(() => import('@/components/ui/BottomNav'),      { ssr: false })
+const WhatsAppButton = dynamic(() => import('@/components/ui/WhatsAppButton'), { ssr: false })
 
 export default function DashboardPage() {
-  const { user, notifications } = useStore()
+  const { user } = useStore()
   const router = useRouter()
-  const [orders, setOrders] = useState<Order[]>([])
+  const [orders, setOrders]   = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!user) { router.push('/auth/login'); return }
-    const load = async () => {
-      try {
-        const userOrders = await getOrdersByUser(user.uid)
-        setOrders(userOrders.length > 0 ? userOrders : DEMO_ORDERS)
-      } catch {
-        setOrders(DEMO_ORDERS)
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
-  }, [user, router])
+    const unsub = auth.onAuthStateChanged(u => {
+      if (!u) router.push('/auth/login')
+    })
+    return () => unsub()
+  }, [router])
+
+  useEffect(() => {
+    if (!user?.uid) { setLoading(false); return }
+    const q = query(
+      collection(db, 'orders'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    )
+    const unsub = onSnapshot(q,
+      snap => { setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false) },
+      () => { setOrders([]); setLoading(false) }
+    )
+    return () => unsub()
+  }, [user?.uid])
 
   const handleLogout = async () => {
-    await logout()
-    toast.success('Logged out successfully')
-    router.push('/')
+    await logout(); toast.success('Logged out'); router.push('/')
   }
 
   if (!user) return null
 
-  const totalSpent = orders.filter(o => o.status !== 'rejected').reduce((s, o) => s + o.amount, 0)
-  const delivered = orders.filter(o => o.status === 'delivered').length
+  const delivered  = orders.filter(o => o.status === 'delivered').length
+  const totalSpent = orders.filter(o => !['rejected','pending'].includes(o.status)).reduce((s,o) => s + (o.amount||0), 0)
+
+  const statusBg: Record<string,string> = {
+    pending:'rgba(243,156,18,0.15)', payment_reviewing:'rgba(52,152,219,0.15)',
+    approved:'rgba(39,174,96,0.15)', in_progress:'rgba(155,89,182,0.15)',
+    ready:'rgba(212,160,23,0.15)', delivered:'rgba(26,188,156,0.15)', rejected:'rgba(231,76,60,0.15)'
+  }
+  const statusFg: Record<string,string> = {
+    pending:'#F39C12', payment_reviewing:'#3498DB', approved:'#27AE60',
+    in_progress:'#9B59B6', ready:'#D4A017', delivered:'#1ABC9C', rejected:'#E74C3C'
+  }
 
   return (
-    <div className="min-h-screen bg-dark">
+    <div style={{ minHeight:'100vh', background:'#080808', color:'#F0EDE6' }}>
       <Navbar />
 
-      {/* Profile header */}
-      <section className="px-4 pt-8 pb-6 bg-[radial-gradient(ellipse_80%_50%_at_50%_0%,rgba(212,160,23,0.1),transparent)]">
-        <div className="flex items-center gap-4 mb-5">
-          <div className="w-16 h-16 rounded-full bg-gold-gradient flex items-center justify-center font-bebas text-2xl text-black flex-shrink-0">
+      <section style={{ padding:'24px 16px 20px', background:'radial-gradient(ellipse 80% 50% at 50% 0%,rgba(212,160,23,0.1),transparent)' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:14, marginBottom:20 }}>
+          <div style={{ width:56, height:56, borderRadius:'50%', background:'linear-gradient(135deg,#D4A017,#F5C842)', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'serif', fontSize:22, color:'#000', fontWeight:700, flexShrink:0 }}>
             {user.displayName?.[0]?.toUpperCase() || 'U'}
           </div>
-          <div className="flex-1">
-            <h1 className="font-syne text-xl font-extrabold leading-tight">{user.displayName}</h1>
-            <p className="text-xs text-[#88887f] mt-0.5">{user.email}</p>
-            {user.phone && <p className="text-xs text-[#88887f]">{user.phone}</p>}
+          <div style={{ flex:1 }}>
+            <h1 style={{ fontFamily:'serif', fontSize:20, fontWeight:800 }}>{user.displayName}</h1>
+            <p style={{ fontSize:12, color:'#888', marginTop:2 }}>{user.email}</p>
           </div>
-          <button onClick={handleLogout} className="p-2 rounded-full bg-white/[0.06] text-[#88887f] hover:text-red-400 transition-colors">
+          <button onClick={handleLogout} style={{ padding:8, background:'rgba(255,255,255,0.06)', border:'none', borderRadius:'50%', cursor:'pointer', color:'#888', display:'flex', alignItems:'center' }}>
             <LogOut size={16} />
           </button>
         </div>
-
-        {/* Stats row */}
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            { label: 'Total Orders', value: orders.length },
-            { label: 'Delivered',    value: delivered      },
-            { label: 'Total Spent',  value: `K${totalSpent}` },
-          ].map((s) => (
-            <div key={s.label} className="bg-[#1a1a1a] border border-white/[0.08] rounded-xl px-3 py-3 text-center">
-              <p className="font-bebas text-2xl text-[#D4A017] leading-none">{s.value}</p>
-              <p className="text-[9px] text-[#88887f] mt-1 uppercase tracking-wide">{s.label}</p>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
+          {[{ l:'Total Orders', v:orders.length },{ l:'Delivered', v:delivered },{ l:'Total Spent', v:`K${totalSpent}` }].map(s => (
+            <div key={s.l} style={{ background:'#1a1a1a', border:'1px solid rgba(255,255,255,0.08)', borderRadius:14, padding:'12px 8px', textAlign:'center' }}>
+              <p style={{ fontFamily:'serif', fontSize:22, color:'#D4A017', lineHeight:1 }}>{s.v}</p>
+              <p style={{ fontSize:10, color:'#888', marginTop:4, textTransform:'uppercase' }}>{s.l}</p>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Quick actions */}
-      <section className="px-4 mb-5">
-        <div className="grid grid-cols-2 gap-2">
+      <section style={{ padding:'0 16px 20px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
           {[
-            { icon: <Package size={18} />,       label: 'New Service Request', href: '/services',  color: 'bg-gold-gradient text-black' },
-            { icon: <MessageCircle size={18} />, label: 'Message Us',          href: '/messages',  color: 'bg-[#1a1a1a] border border-white/[0.08] text-white' },
-            { icon: <MapPin size={18} />,         label: 'Track Order',        href: '/track',     color: 'bg-[#1a1a1a] border border-white/[0.08] text-white' },
-            { icon: <Crown size={18} />,          label: 'Browse Shop',        href: '/shop',      color: 'bg-[#1a1a1a] border border-white/[0.08] text-white' },
-          ].map((a) => (
-            <Link key={a.label} href={a.href} className={`${a.color} rounded-2xl p-4 flex items-center gap-3 font-medium text-sm transition-all hover:opacity-90 active:scale-95`}>
-              {a.icon} {a.label}
+            { icon:'⚡', label:'New Service Request', href:'/services',  gold:true  },
+            { icon:'💬', label:'Message Us',          href:'/messages',  gold:false },
+            { icon:'📍', label:'Track Order',         href:'/track',     gold:false },
+            { icon:'🛍', label:'Browse Shop',         href:'/shop',      gold:false },
+          ].map(a => (
+            <Link key={a.label} href={a.href} style={{ background:a.gold?'linear-gradient(135deg,#D4A017,#F5C842)':'#1a1a1a', border:a.gold?'none':'1px solid rgba(255,255,255,0.08)', borderRadius:16, padding:'14px 12px', display:'flex', alignItems:'center', gap:10, textDecoration:'none', color:a.gold?'#000':'#F0EDE6', fontWeight:600, fontSize:13 }}>
+              <span style={{ fontSize:18 }}>{a.icon}</span> {a.label}
             </Link>
           ))}
         </div>
       </section>
 
-      {/* Notifications */}
-      {notifications.length > 0 && (
-        <section className="px-4 mb-5">
-          <h2 className="font-syne text-sm font-bold mb-3 flex items-center gap-2">
-            <Bell size={15} className="text-[#D4A017]" /> Notifications
-          </h2>
-          {notifications.slice(0, 3).map((n) => (
-            <div key={n.id} className="bg-[rgba(212,160,23,0.06)] border border-[rgba(212,160,23,0.2)] rounded-xl p-3 mb-2">
-              <p className="text-xs font-semibold">{n.title}</p>
-              <p className="text-xs text-[#88887f] mt-0.5">{n.message}</p>
-            </div>
-          ))}
-        </section>
-      )}
-
-      {/* Orders */}
-      <section className="px-4 pb-28">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-syne text-sm font-bold">My Orders</h2>
-          <Link href="/track" className="text-xs text-[#D4A017]">Track →</Link>
+      <section style={{ padding:'0 16px 100px' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
+          <h2 style={{ fontFamily:'serif', fontSize:16, fontWeight:800 }}>My Orders</h2>
+          <Link href="/track" style={{ fontSize:12, color:'#D4A017', textDecoration:'none' }}>Track →</Link>
         </div>
 
         {loading ? (
-          <div className="space-y-3">
-            {[1,2,3].map(i => <div key={i} className="h-20 skeleton rounded-2xl" />)}
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {[1,2].map(i => <div key={i} style={{ height:80, background:'#1a1a1a', borderRadius:16, animation:'pulse 1.5s infinite' }} />)}
           </div>
         ) : orders.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-4xl mb-3">📋</div>
-            <p className="text-sm font-semibold text-[#88887f]">No orders yet</p>
-            <Link href="/services" className="btn-gold mt-3 px-6 py-2.5 rounded-full text-xs font-bold inline-block">
-              Browse Services
+          <div style={{ textAlign:'center', paddingTop:48, paddingBottom:48 }}>
+            <div style={{ fontSize:64, marginBottom:14 }}>📋</div>
+            <h3 style={{ fontFamily:'serif', fontSize:20, fontWeight:800, marginBottom:8 }}>No orders yet</h3>
+            <p style={{ fontSize:13, color:'#888', lineHeight:1.7, marginBottom:24, maxWidth:260, margin:'0 auto 24px' }}>
+              You haven't placed any orders yet. Browse our services and request your first design!
+            </p>
+            <Link href="/services" style={{ background:'linear-gradient(135deg,#D4A017,#F5C842)', color:'#000', fontWeight:700, padding:'13px 28px', borderRadius:50, fontSize:14, textDecoration:'none', display:'inline-block' }}>
+              Browse Services →
             </Link>
           </div>
-        ) : (
-          <div className="space-y-3">
-            {orders.map((order, i) => (
-              <motion.div
-                key={order.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.06 }}
-                className="bg-[#1a1a1a] border border-white/[0.08] rounded-2xl p-4 hover:border-[rgba(212,160,23,0.2)] transition-all"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <p className="font-mono text-xs text-[#D4A017] mb-0.5">{order.orderNumber}</p>
-                    <p className="text-sm font-semibold">{order.serviceName}</p>
-                  </div>
-                  <span className={`text-[9px] font-bold px-2 py-1 rounded-full border capitalize ${STATUS_COLORS[order.status] || 'status-pending'}`}>
-                    {order.status.replace(/_/g, ' ')}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-[#D4A017]">K{order.amount}</span>
-                  <div className="flex gap-2">
-                    {order.status === 'delivered' && (
-                      <button className="text-xs bg-green-400/10 border border-green-400/20 text-green-400 px-3 py-1.5 rounded-lg font-semibold">
-                        ⬇️ Download
-                      </button>
-                    )}
-                    <Link href="/track" className="text-xs bg-[#222] border border-white/[0.08] text-[#88887f] px-3 py-1.5 rounded-lg">
-                      Track
-                    </Link>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        )}
+        ) : orders.map((order, i) => (
+          <motion.div key={order.id} initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} transition={{ delay:i*0.05 }}
+            style={{ background:'#1a1a1a', border:'1px solid rgba(255,255,255,0.08)', borderRadius:16, padding:'14px 16px', marginBottom:10 }}>
+            <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:8 }}>
+              <div>
+                <p style={{ fontFamily:'monospace', fontSize:11, color:'#D4A017', marginBottom:3 }}>{order.orderNumber || order.id?.slice(0,8).toUpperCase()}</p>
+                <p style={{ fontSize:15, fontWeight:600 }}>{order.serviceName || order.productName || 'Custom Order'}</p>
+              </div>
+              <span style={{ fontSize:10, fontWeight:700, padding:'4px 10px', borderRadius:50, background:statusBg[order.status]||statusBg.pending, color:statusFg[order.status]||statusFg.pending, textTransform:'capitalize', whiteSpace:'nowrap', marginLeft:8 }}>
+                {(order.status||'pending').replace(/_/g,' ')}
+              </span>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <span style={{ fontSize:18, fontWeight:700, color:'#D4A017' }}>K{order.amount}</span>
+              <div style={{ display:'flex', gap:8 }}>
+                {order.status === 'pending' && (
+                  <Link href={`/checkout?orderId=${order.orderNumber||order.id}&amount=${order.amount}&service=${encodeURIComponent(order.serviceName||'')}`}
+                    style={{ background:'linear-gradient(135deg,#D4A017,#F5C842)', color:'#000', fontSize:12, fontWeight:700, padding:'8px 14px', borderRadius:10, textDecoration:'none' }}>
+                    💳 Pay Now
+                  </Link>
+                )}
+                {order.status === 'delivered' && (
+                  <button onClick={() => order.downloadUrl ? window.open(order.downloadUrl) : toast('Contact Ken on WhatsApp for your files: 0772799672')}
+                    style={{ background:'rgba(26,188,156,0.15)', border:'1px solid rgba(26,188,156,0.3)', color:'#1ABC9C', fontSize:12, fontWeight:700, padding:'8px 14px', borderRadius:10, cursor:'pointer' }}>
+                    ⬇️ Download
+                  </button>
+                )}
+                <Link href="/track" style={{ background:'#222', border:'1px solid rgba(255,255,255,0.08)', color:'#888', fontSize:12, padding:'8px 12px', borderRadius:10, textDecoration:'none' }}>
+                  Track
+                </Link>
+              </div>
+            </div>
+          </motion.div>
+        ))}
       </section>
 
       <BottomNav />
       <WhatsAppButton />
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}`}</style>
     </div>
   )
 }
